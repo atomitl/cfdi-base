@@ -35,18 +35,29 @@ static String changeAttributeBase(String content, String attribute, String oldRo
 
 void downloadSatResouce(List<String> downloads, String url, String basePath) {
     String baseUrl = 'http://www.sat.gob.mx/sitio_internet/'
+    if (!new File(basePath).isAbsolute()) {
+        basePath = "${rootDir}/${basePath}"
+    }
     String filePath = url.replace(baseUrl, basePath + (url.endsWith('.xslt') ? 'xslt/' : 'xsd/'))
     if (url.find('/cfd/[0-9]{1}/') == null) {
         //if url contain cfd version change 'common' dir
         filePath = filePath.replaceAll('/cfd/', '/common/')
     }
-    download {
-        src url
-        dest filePath
-        overwrite true
+    File targetFile = new File(filePath)
+    if (!targetFile.parentFile.exists()) {
+        targetFile.parentFile.mkdirs()
+    }
+    println "Download ${url}"
+    InputStream inputStream = new URL(url).openStream()
+    try {
+        targetFile.withOutputStream { outputStream ->
+            outputStream << inputStream
+        }
+    } finally {
+        inputStream.close()
     }
     File file = new File(filePath)
-    downloads.add(filePath.replace('src/main/resources', ''))
+    downloads.add(filePath.replace("${rootDir}/src/main/resources", ''))
 
     String regexFilter = url.endsWith('.xsd') ?
             '(?<=schemaLocation=\")(.*?)(?=\")' : //regex to find schema location
@@ -62,7 +73,8 @@ void downloadSatResouce(List<String> downloads, String url, String basePath) {
                 String newUrlName = newUrlResource.substring(newUrlResource.lastIndexOf('/') + 1)
                 String localPath = downloads.find { value -> value.endsWith(newUrlName) }
                 if (localPath.endsWith('.xsd')) {
-                    String relativePath = "./" + new File("$rootDir/$filePath").parentFile.relativePath(new File("$rootDir/src/main/resources$localPath"))
+                    File localFile = new File("${rootDir}/src/main/resources${localPath}")
+                    String relativePath = "./" + new File(filePath).parentFile.relativePath(localFile)
                     content = content.replace(newUrlResource, relativePath) //replace value with local file
                 } else if (localPath.endsWith('.xslt')) {
                     content = content.replace(newUrlResource, localPath) //replace value with local file
@@ -216,12 +228,12 @@ tasks.register("satResources") {
                 downloadSatResouce(
                         localDownloads,
                         url,
-                        'src/main/resources/'
+                        "${rootDir}/src/main/resources/"
                 )
             }
-            replaceXsd(Class, localDownloads)
+            replaceXsd("${rootDir}/${Class}", localDownloads)
             replaceXslt(
-                    Class,
+                    "${rootDir}/${Class}",
                     urls
                             .find { value -> value.endsWith(".xslt") }
                             .replace('http://www.sat.gob.mx/sitio_internet/', '/xslt/')
@@ -286,7 +298,7 @@ tasks.register("satResources") {
     </jaxb:bindings>
 </jaxb:bindings>"""
                     String _cbfPath = "src/main/resources/bindingFiles/${actualXsd.getName().replace(".xsd", "_bind.xml")}";
-                    _cbf = new File(_cbfPath)
+                    _cbf = new File("${rootDir}/${_cbfPath}")
                     if (!_cbf.getParentFile().exists()) _cbf.getParentFile().mkdir()
                     _cbf.setText(_customBindingContent, 'UTF-8')
 
@@ -299,7 +311,7 @@ tasks.register("satResources") {
                 }
         bindingFileContent += '\t}\n}'
 
-        File file = new File('build.gradle')
+        File file = new File("${rootDir}/build.gradle")
         String content = file.getText('UTF-8')
         int first_index = content.indexOf('//START OF XJC-GEN') + ('//START OF XJC-GEN'.length())
         int last_index = content.indexOf('//END OF XJC-GEN')
@@ -308,7 +320,7 @@ tasks.register("satResources") {
 
         String mapString = ''
         namespaceMap.forEach { pkg, xsd ->
-            String xsdContent = new File('src/main/resources/' + xsd).getText('UTF-8')
+            String xsdContent = new File("${rootDir}/src/main/resources/" + xsd).getText('UTF-8')
             int start_index = xsdContent.indexOf("targetNamespace")
             String nsUrl = (xsdContent.substring(start_index, start_index + 150) =~ '(?<=targetNamespace=")((.)*?)(?=")').findAll()[0][0]
             String some = (xsdContent.substring(0, 150) =~ '(?<=xmlns:)((.)*?)(?==)').findAll().toString().split('\\[|\\]|,').find { value -> value != null && !value.trim().isEmpty() && !value.trim().equalsIgnoreCase("xs") && !value.trim().equalsIgnoreCase("s") }
@@ -316,7 +328,7 @@ tasks.register("satResources") {
                 mapString = mapString + '\n\t\tnamespaceMap.put("' + some + ':' + pkg + '", "' + nsUrl + '");'
             }
         }
-        file = new File('src/main/java/mx/grupocorasa/sat/common/CfdCommon.java')
+        file = new File("${rootDir}/src/main/java/mx/grupocorasa/sat/common/CfdCommon.java")
         content = file.getText('UTF-8')
         first_index = content.indexOf('Map<String, String> namespaceMap = new HashMap<>();') + ('Map<String, String> namespaceMap = new HashMap<>();'.length())
         last_index = content.indexOf('return namespaceMap;')
@@ -351,8 +363,8 @@ tasks.register("cleanSatResources") {
         ]
 
         cfds.each { f ->
-            File file = new File(f)
-            if (file.exists()) {
+                File file = new File("${rootDir}/${f}")
+                if (file.exists()) {
                 String content = file.getText('UTF-8')
                 String[] xsltSplit = content.split("private final String XSLT = \"")
                 String continued = xsltSplit[1].substring(xsltSplit[1].indexOf("\""))
@@ -365,7 +377,7 @@ tasks.register("cleanSatResources") {
         }
 
         String startToken = '//START OF XJC-GEN'
-        File file = new File('build.gradle')
+        File file = new File("${rootDir}/build.gradle")
         String content = file.getText('UTF-8')
         int first_index = content.indexOf(startToken) + (startToken.length())
         int last_index = content.indexOf('//END OF XJC-GEN')
@@ -373,7 +385,7 @@ tasks.register("cleanSatResources") {
         file.setText(content, 'UTF-8')
 
         startToken = 'Map<String, String> namespaceMap = new HashMap<>();'
-        file = new File('src/main/java/mx/grupocorasa/sat/common/CfdCommon.java')
+        file = new File("${rootDir}/src/main/java/mx/grupocorasa/sat/common/CfdCommon.java")
         content = file.getText('UTF-8')
         first_index = content.indexOf(startToken) + (startToken.length())
         last_index = content.indexOf('return namespaceMap;')
